@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
 import { FaRocket } from "react-icons/fa";
@@ -71,9 +71,9 @@ export default function App() {
   const [selectedAccountIds, setSelectedAccountIds] = useState([]);
   const [allAccounts, setAllAccounts] = useState(false);
 
-  
+
   const [primaryAccountId, setPrimaryAccountId] = useState("");
-// regions
+  // regions
   const [availableRegions, setAvailableRegions] = useState([]);
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [allRegions, setAllRegions] = useState(true);
@@ -133,7 +133,7 @@ export default function App() {
         if (list.length) {
           setSelectedAccountIds([list[0].id]);
           setPrimaryAccountId(list[0].id);
-}
+        }
       } catch (e) {
         setSendError(
           e?.response?.data?.message || e?.message || "Failed to load accounts"
@@ -148,7 +148,7 @@ export default function App() {
     async function loadRegions() {
       try {
         const accountId = primaryAccountId || "";
-if (!accountId) return;
+        if (!accountId) return;
         const out = await regionsList(accountId);
         const regions = out?.regions || [];
         setAvailableRegions(regions);
@@ -168,7 +168,7 @@ if (!accountId) return;
     }
     loadRegions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccountIds, allAccounts]);
+  }, [primaryAccountId, allRegions]);
 
   useEffect(() => {
     // Auto SES validate with debounce
@@ -204,9 +204,9 @@ if (!accountId) return;
         setEmailStatus({ state: "error", details: [] });
         setSendError(
           err?.response?.data?.message ||
-            err?.response?.data?.error ||
-            err?.message ||
-            "Email check failed"
+          err?.response?.data?.error ||
+          err?.message ||
+          "Email check failed"
         );
       }
     }, 900);
@@ -268,14 +268,19 @@ if (!accountId) return;
       // 2) Send report
       await reportSend({
         days: daysNum,
-        emails: emails,
-        toemails: emails,
 
+        // emails
+        toEmails: emailsCsv,
+        emails: emails,
+
+        // accounts
         all_accounts: allAccounts,
+        primaryAccountId: primaryAccountId || null,
         accountIds: selectedAccountsEffective,
 
+        // regions
         all_regions: allRegions,
-        regions: selectedRegions,
+        regions: allRegions ? [] : selectedRegions,
       });
 
       setSendState("success");
@@ -480,3 +485,4 @@ if (!accountId) return;
     </div>
   );
 }
+
