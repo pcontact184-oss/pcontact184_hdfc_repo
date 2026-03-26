@@ -1,0 +1,358 @@
+:root {
+  --primary-color: #4e9e92;
+  --secondary-color: #f1f1f1;
+  --highlight-color: #ff6a00;
+  --clr-button-color: #ff4b4b;
+  --text-color: #333;
+  --border-radius: 12px;
+  --transition-speed: 0.3s;
+  --gradient-bg: linear-gradient(135deg, #f7f7ff, #eef6ff);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  font-family: "Roboto", sans-serif;
+  color: var(--text-color);
+}
+
+body {
+  overflow: hidden;
+  background: #000;
+}
+
+/* Full screen background video wrapper */
+.video-background {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  background: #000;
+}
+
+/* Two-layer smooth video transition */
+.video-layer {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  object-position: center center;
+  opacity: 0;
+  transition: opacity 0.9s ease-in-out;
+  will-change: opacity;
+}
+
+.video-layer.active {
+  opacity: 1;
+}
+
+.video-layer.inactive {
+  opacity: 0;
+}
+
+/* Main page container */
+.page {
+  position: relative;
+  min-height: 100vh;
+  width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  padding: 22px;
+  text-align: center;
+  overflow: hidden;
+}
+
+/* Overlay over video so content stays highlighted */
+.page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.30);
+  z-index: 1;
+}
+
+/* Main content card */
+.card {
+  position: relative;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 16px;
+  padding: 68px 72px 60px;
+  width: 100%;
+  max-width: 1440px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(6px);
+  transition: transform var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+.card:hover {
+  transform: scale(1.01);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36);
+}
+
+/* Logo */
+.logo-container {
+  margin-bottom: 26px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.logo {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+
+/* Heading */
+.headerText {
+  color: var(--primary-color);
+  margin: 18px 0 22px;
+  font-weight: 700;
+  font-size: 38px;
+  line-height: 1.2;
+}
+
+/* Each form section */
+.section {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Section labels */
+.label {
+  font-weight: 700;
+  font-size: 24px;
+  color: var(--primary-color);
+  margin-bottom: 14px;
+}
+
+/* Input fields and send button width alignment */
+.input,
+.rocketButton {
+  width: 100%;
+  max-width: 1290px;
+}
+
+/* Inputs */
+.input {
+  width: 100%;
+  padding: 22px 22px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  font-size: 20px;
+  outline: none;
+  transition: all 0.3s ease;
+  display: block;
+  background: #3f3f3f;
+  color: #fff;
+}
+
+.input::placeholder {
+  color: #bdbdbd;
+}
+
+.input:hover,
+.input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 10px rgba(78, 158, 146, 0.22);
+}
+
+/* Secondary button */
+.button {
+  margin-top: 18px;
+  background: var(--primary-color);
+  color: white;
+  padding: 15px 36px;
+  font-size: 18px;
+  min-width: 210px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color var(--transition-speed), transform var(--transition-speed);
+}
+
+.button:hover {
+  background: var(--highlight-color);
+}
+
+/* Main send button */
+.rocketButton {
+  background: linear-gradient(90deg, #10b981, #22c1f1);
+  color: white;
+  padding: 20px 26px;
+  border: none;
+  border-radius: 12px;
+  font-size: 28px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-speed);
+  margin: 34px auto 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+
+.rocketButton:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+/* Clear button */
+.clearButton {
+  position: relative;
+  margin-top: 12px;
+  margin-left: auto;
+  margin-right: auto;
+  display: block;
+  background-color: #ff4b4b;
+  color: white;
+  padding: 7px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color var(--transition-speed), transform var(--transition-speed);
+  border: none;
+}
+
+.clearButton:hover {
+  background-color: #ff2f2f;
+  transform: scale(1.04);
+}
+
+/* OTP box */
+.otpBox {
+  margin-top: 24px;
+  background-color: #f1f1f1;
+  padding: 22px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+}
+
+/* Loading spinner */
+.loader {
+  border: 6px solid #f3f3f3;
+  border-top: 6px solid #4e9e92;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  margin: 22px auto;
+}
+
+/* Success state */
+.successCircle {
+  width: 86px;
+  height: 86px;
+  background: linear-gradient(135deg, #28a745, #50c878);
+  color: white;
+  border-radius: 50%;
+  font-size: 34px;
+  font-weight: 600;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 22px auto;
+}
+
+/* Status messages */
+.ok {
+  color: #28a745;
+  font-weight: 600;
+  margin-top: 10px;
+  font-size: 16px;
+}
+
+.err {
+  color: red;
+  font-weight: 600;
+  margin-top: 10px;
+  font-size: 16px;
+}
+
+/* Optional link-style button */
+.linkBtn {
+  background: transparent;
+  border: none;
+  color: #00aaff;
+  cursor: pointer;
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+/* Tablet / mobile */
+@media (max-width: 768px) {
+  .page {
+    padding: 14px;
+  }
+
+  .card {
+    max-width: 96%;
+    padding: 28px 18px;
+  }
+
+  .logo {
+    max-width: 320px;
+  }
+
+  .headerText {
+    font-size: 26px;
+    margin: 16px 0 14px;
+  }
+
+  .section {
+    margin-top: 20px;
+  }
+
+  .label {
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+
+  .input,
+  .rocketButton {
+    max-width: 100%;
+  }
+
+  .input {
+    font-size: 16px;
+    padding: 16px 14px;
+  }
+
+  .button {
+    font-size: 15px;
+    padding: 12px 20px;
+    min-width: 160px;
+  }
+
+  .rocketButton {
+    font-size: 19px;
+    padding: 15px 16px;
+    margin-top: 24px;
+  }
+
+  .clearButton {
+    font-size: 12px;
+    padding: 5px 14px;
+  }
+}
