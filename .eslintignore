@@ -1,0 +1,8 @@
+﻿node_modules
+dist
+docs
+assets
+backend
+*.min.js
+*.bundle.js
+vite.config.js
