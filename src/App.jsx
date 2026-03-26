@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+﻿import { useMemo, useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
 import { FaRocket } from "react-icons/fa";
@@ -66,9 +66,10 @@ export default function App() {
   const [emailsRaw, setEmailsRaw] = useState("");
   const [days, setDays] = useState("7");
 
-  // accounts dropdown (single select)
+  // accounts
   const [accounts, setAccounts] = useState([]); // [{id,name}]
-  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedAccountIds, setSelectedAccountIds] = useState([]);
+  const [allAccounts, setAllAccounts] = useState(false);
 
   // regions
   const [availableRegions, setAvailableRegions] = useState([]);
@@ -92,6 +93,7 @@ export default function App() {
 
   // First email is auth email for OTP verification
   const authEmail = emails[0] || "";
+  const emailsCsv = emails.join(",");
 
   const emailsValidated =
     emailStatus.state === "ok" && emailStatus.details.length === emails.length;
@@ -99,11 +101,15 @@ export default function App() {
   const daysNum = Number(days);
   const daysValid = Number.isFinite(daysNum) && daysNum > 0 && daysNum <= 90;
 
+  const selectedAccountsEffective = allAccounts
+    ? accounts.map((a) => a.id)
+    : selectedAccountIds;
+
   const canEnableSend =
     !locked &&
     emailsValidated &&
     daysValid &&
-    !!selectedAccountId &&
+    selectedAccountsEffective.length > 0 &&
     (allRegions || selectedRegions.length > 0);
 
   const notVerifiedEmails = useMemo(() => {
@@ -114,14 +120,17 @@ export default function App() {
   // Debounce SES check when emails change
   const debounceRef = useRef(null);
 
-  // Load accounts on mount
   useEffect(() => {
     async function init() {
       try {
         const out = await accountsList();
         const list = out?.accounts || [];
         setAccounts(list);
-        if (list.length) setSelectedAccountId(list[0].id);
+
+        // default select first account (if exists)
+        if (list.length) {
+          setSelectedAccountIds([list[0].id]);
+        }
       } catch (e) {
         setSendError(
           e?.response?.data?.message || e?.message || "Failed to load accounts"
@@ -131,15 +140,17 @@ export default function App() {
     init();
   }, []);
 
-  // Load regions when selected account changes
+  // Load regions when selected account changes (use first selected account)
   useEffect(() => {
     async function loadRegions() {
       try {
-        if (!selectedAccountId) return;
-        const out = await regionsList(selectedAccountId);
+        const accountId = (selectedAccountsEffective || [])[0] || "";
+        if (!accountId) return;
+        const out = await regionsList(accountId);
         const regions = out?.regions || [];
         setAvailableRegions(regions);
 
+        // If allRegions = true, we don't need selections. If false, default select first 1
         if (!allRegions) {
           setSelectedRegions((prev) => {
             if (prev && prev.length) return prev.filter((r) => regions.includes(r));
@@ -154,7 +165,7 @@ export default function App() {
     }
     loadRegions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccountId]);
+  }, [selectedAccountIds, allAccounts]);
 
   useEffect(() => {
     // Auto SES validate with debounce
@@ -202,6 +213,13 @@ export default function App() {
     };
   }, [emailsRaw, emailsValid, emails]);
 
+  function toggleAccount(id) {
+    setSelectedAccountIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      return [...prev, id];
+    });
+  }
+
   function toggleRegion(region) {
     setSelectedRegions((prev) => {
       if (prev.includes(region)) return prev.filter((x) => x !== region);
@@ -223,7 +241,7 @@ export default function App() {
     setSendError("");
 
     if (!canEnableSend) {
-      setSendError("Complete SES check + valid days + choose account/regions first.");
+      setSendError("Complete SES check + valid days + choose accounts/regions first.");
       return;
     }
 
@@ -244,23 +262,25 @@ export default function App() {
       // 1) Verify OTP
       await otpVerify(authEmail, otp);
 
-      // 2) Send report  (FIX: include accountIds)
+      // 2) Send report
       await reportSend({
         days: daysNum,
-        emails,                 // array (matches your curl success)
-        accountIds: [selectedAccountId],
+        emails: emailsCsv,
+        toEmails: emailsCsv,
+
+        all_accounts: allAccounts,
+        accountIds: selectedAccountIds,
+
         all_regions: allRegions,
         regions: selectedRegions,
       });
 
       setSendState("success");
+
       setTimeout(() => setSendState("idle"), 2000);
     } catch (err) {
       const msg =
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        err?.message ||
-        "Failed";
+        err?.response?.data?.message || err?.response?.data?.error || err?.message || "Failed";
 
       const nextAttempts = otpAttempts + 1;
       setOtpAttempts(nextAttempts);
@@ -285,6 +305,9 @@ export default function App() {
     setOtp("");
     setOtpAttempts(0);
     setLocked(false);
+
+    setAllAccounts(false);
+    if (accounts.length) setSelectedAccountIds([accounts[0].id]);
 
     setAllRegions(true);
     setSelectedRegions([]);
@@ -317,13 +340,9 @@ export default function App() {
           />
 
           {emailStatus.state === "loading" && <div>Checking SES…</div>}
-          {emailStatus.state === "ok" && (
-            <div className="ok">All emails verified in SES.</div>
-          )}
+          {emailStatus.state === "ok" && <div className="ok">All emails verified in SES.</div>}
           {emailStatus.state === "bad" && (
-            <div className="err">
-              Not verified in SES: {notVerifiedEmails.join(", ")}
-            </div>
+            <div className="err">Not verified in SES: {notVerifiedEmails.join(", ")}</div>
           )}
           {emailStatus.state === "error" && (
             <div className="err">SES check failed. Fix emails or try again.</div>
@@ -331,22 +350,31 @@ export default function App() {
         </div>
 
         <div className="section">
-          <label className="label">2) Account</label>
-          <select
-            className="input"
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
-            disabled={!emailsValidated || locked}
-          >
-            <option value="" disabled>
-              Select account…
-            </option>
+          <label className="label">2) Accounts</label>
+
+          <label style={{ display: "block", marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              checked={allAccounts}
+              onChange={(e) => setAllAccounts(e.target.checked)}
+              disabled={!emailsValidated || locked}
+            />{" "}
+            All accounts
+          </label>
+
+          <div style={{ maxHeight: 120, overflow: "auto", opacity: allAccounts ? 0.5 : 1 }}>
             {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
+              <label key={a.id} style={{ display: "block" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedAccountIds.includes(a.id)}
+                  onChange={() => toggleAccount(a.id)}
+                  disabled={allAccounts || !emailsValidated || locked}
+                />{" "}
                 {a.name} ({a.id})
-              </option>
+              </label>
             ))}
-          </select>
+          </div>
         </div>
 
         <div className="section">
@@ -358,9 +386,7 @@ export default function App() {
             placeholder="7"
             disabled={!emailsValidated || locked}
           />
-          {!daysValid && days !== "" && (
-            <div className="err">Days must be between 1 and 90.</div>
-          )}
+          {!daysValid && days !== "" && <div className="err">Days must be between 1 and 90.</div>}
         </div>
 
         <div className="section">
