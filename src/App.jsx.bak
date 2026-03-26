@@ -71,9 +71,7 @@ export default function App() {
   const [selectedAccountIds, setSelectedAccountIds] = useState([]);
   const [allAccounts, setAllAccounts] = useState(false);
 
-  
-  const [primaryAccountId, setPrimaryAccountId] = useState("");
-// regions
+  // regions
   const [availableRegions, setAvailableRegions] = useState([]);
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [allRegions, setAllRegions] = useState(true);
@@ -105,7 +103,7 @@ export default function App() {
 
   const selectedAccountsEffective = allAccounts
     ? accounts.map((a) => a.id)
-    : Array.from(new Set([primaryAccountId, ...selectedAccountIds].filter(Boolean)));
+    : selectedAccountIds;
 
   const canEnableSend =
     !locked &&
@@ -132,8 +130,7 @@ export default function App() {
         // default select first account (if exists)
         if (list.length) {
           setSelectedAccountIds([list[0].id]);
-          setPrimaryAccountId(list[0].id);
-}
+        }
       } catch (e) {
         setSendError(
           e?.response?.data?.message || e?.message || "Failed to load accounts"
@@ -147,8 +144,8 @@ export default function App() {
   useEffect(() => {
     async function loadRegions() {
       try {
-        const accountId = primaryAccountId || "";
-if (!accountId) return;
+        const accountId = (selectedAccountsEffective || [])[0] || "";
+        if (!accountId) return;
         const out = await regionsList(accountId);
         const regions = out?.regions || [];
         setAvailableRegions(regions);
@@ -268,11 +265,11 @@ if (!accountId) return;
       // 2) Send report
       await reportSend({
         days: daysNum,
-        emails: emails,
-        toemails: emails,
+        emails: emailsCsv,
+        toEmails: emailsCsv,
 
         all_accounts: allAccounts,
-        accountIds: selectedAccountsEffective,
+        accountIds: selectedAccountIds,
 
         all_regions: allRegions,
         regions: selectedRegions,
