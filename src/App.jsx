@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect } from "react";
+﻿import { useMemo, useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
 import { FaRocket } from "react-icons/fa";
@@ -19,7 +19,7 @@ if (!API_KEY)
 // One axios client so x-api-key always attached
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
+  timeout: 60000,
   headers: {
     "Content-Type": "application/json",
     "x-api-key": API_KEY,
@@ -37,38 +37,44 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function isValidRegion(region) {
-  return /^[a-z]{2}-[a-z]+-\d$/.test(region);
-}
-
 async function sesCheck(email) {
   const res = await api.post("/ses/check", { email });
   return res.data;
 }
 
 async function otpVerify(email, otp) {
-  const res = await api.post("/otp/verify", {
-    email,
-    otp,
-  });
+  const res = await api.post("/otp/verify", { email, otp });
   return res.data;
 }
 
-async function reportSend({ days, emailsCsv, regions }) {
-  const res = await api.post("/report/send", {
-    days: Number(days),
-    emails: emailsCsv,
-    toEmails: emailsCsv,
-    regions,
-    all_regions: false,
-  });
+async function accountsList() {
+  const res = await api.post("/accounts/list", {});
+  return res.data;
+}
+
+async function regionsList(accountId) {
+  const res = await api.post("/regions/list", { accountId });
+  return res.data;
+}
+
+async function reportSend(payload) {
+  const res = await api.post("/report/send", payload);
   return res.data;
 }
 
 export default function App() {
   const [emailsRaw, setEmailsRaw] = useState("");
   const [days, setDays] = useState("7");
-  const [regionsRaw, setRegionsRaw] = useState("ap-south-1");
+
+  // accounts
+  const [accounts, setAccounts] = useState([]); // [{id,name}]
+  const [selectedAccountIds, setSelectedAccountIds] = useState([]);
+  const [allAccounts, setAllAccounts] = useState(false);
+
+  // regions
+  const [availableRegions, setAvailableRegions] = useState([]);
+  const [selectedRegions, setSelectedRegions] = useState([]);
+  const [allRegions, setAllRegions] = useState(true);
 
   const [emailStatus, setEmailStatus] = useState({
     state: "idle", // idle | loading | ok | bad | error
@@ -83,10 +89,11 @@ export default function App() {
   const [locked, setLocked] = useState(false);
 
   const emails = useMemo(() => normalizeCsv(emailsRaw), [emailsRaw]);
-  const regions = useMemo(() => normalizeCsv(regionsRaw), [regionsRaw]);
-
   const emailsValid = emails.length > 0 && emails.every((e) => isValidEmail(e));
-  const canValidateEmails = !locked && emailsValid;
+
+  // First email is auth email for OTP verification
+  const authEmail = emails[0] || "";
+  const emailsCsv = emails.join(",");
 
   const emailsValidated =
     emailStatus.state === "ok" && emailStatus.details.length === emails.length;
@@ -94,70 +101,130 @@ export default function App() {
   const daysNum = Number(days);
   const daysValid = Number.isFinite(daysNum) && daysNum > 0 && daysNum <= 90;
 
-  const regionsValid = regions.length > 0 && regions.every((r) => isValidRegion(r));
+  const selectedAccountsEffective = allAccounts
+    ? accounts.map((a) => a.id)
+    : selectedAccountIds;
 
-  const canEnableSend = !locked && emailsValidated && daysValid && regionsValid;
-
-  // First email is auth email for OTP verification
-  const authEmail = emails[0] || "";
-
-  // This is what backend receives
-  const emailsCsv = emails.join(",");
+  const canEnableSend =
+    !locked &&
+    emailsValidated &&
+    daysValid &&
+    selectedAccountsEffective.length > 0 &&
+    (allRegions || selectedRegions.length > 0);
 
   const notVerifiedEmails = useMemo(() => {
     if (!emailStatus.details?.length) return [];
     return emailStatus.details.filter((d) => !d.ok).map((d) => d.email);
   }, [emailStatus.details]);
 
+  // Debounce SES check when emails change
+  const debounceRef = useRef(null);
+
   useEffect(() => {
-    // Reset form values on page refresh
-    setEmailsRaw("");
-    setDays("7");
-    setRegionsRaw("ap-south-1");
+    async function init() {
+      try {
+        const out = await accountsList();
+        const list = out?.accounts || [];
+        setAccounts(list);
+
+        // default select first account (if exists)
+        if (list.length) {
+          setSelectedAccountIds([list[0].id]);
+        }
+      } catch (e) {
+        setSendError(
+          e?.response?.data?.message || e?.message || "Failed to load accounts"
+        );
+      }
+    }
+    init();
   }, []);
 
-  async function handleValidateEmails() {
+  // Load regions when selected account changes (use first selected account)
+  useEffect(() => {
+    async function loadRegions() {
+      try {
+        const accountId = (selectedAccountsEffective || [])[0] || "";
+        if (!accountId) return;
+        const out = await regionsList(accountId);
+        const regions = out?.regions || [];
+        setAvailableRegions(regions);
+
+        // If allRegions = true, we don't need selections. If false, default select first 1
+        if (!allRegions) {
+          setSelectedRegions((prev) => {
+            if (prev && prev.length) return prev.filter((r) => regions.includes(r));
+            return regions.length ? [regions[0]] : [];
+          });
+        }
+      } catch (e) {
+        setSendError(
+          e?.response?.data?.message || e?.message || "Failed to load regions"
+        );
+      }
+    }
+    loadRegions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAccountIds, allAccounts]);
+
+  useEffect(() => {
+    // Auto SES validate with debounce
     setSendError("");
 
-    if (!emails.length) {
-      setEmailStatus({ state: "error", details: [] });
-      setSendError("Enter at least one email.");
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!emailsRaw.trim()) {
+      setEmailStatus({ state: "idle", details: [] });
       return;
     }
 
     if (!emailsValid) {
       setEmailStatus({ state: "error", details: [] });
-      setSendError("One or more emails are invalid.");
       return;
     }
 
-    setEmailStatus({ state: "loading", details: [] });
-
-    try {
-      const results = [];
-
-      for (const e of emails) {
-        const out = await sesCheck(e);
-        results.push({ email: e, ok: out?.exists === true, out });
+    debounceRef.current = setTimeout(async () => {
+      setEmailStatus({ state: "loading", details: [] });
+      try {
+        const results = [];
+        for (const e of emails) {
+          const out = await sesCheck(e);
+          results.push({ email: e, ok: out?.exists === true, out });
+        }
+        const allOk = results.every((r) => r.ok);
+        if (!allOk) {
+          setEmailStatus({ state: "bad", details: results });
+          return;
+        }
+        setEmailStatus({ state: "ok", details: results });
+      } catch (err) {
+        setEmailStatus({ state: "error", details: [] });
+        setSendError(
+          err?.response?.data?.message ||
+            err?.response?.data?.error ||
+            err?.message ||
+            "Email check failed"
+        );
       }
+    }, 900);
 
-      const allOk = results.every((r) => r.ok);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [emailsRaw, emailsValid, emails]);
 
-      if (!allOk) {
-        setEmailStatus({ state: "bad", details: results });
-        return;
-      }
+  function toggleAccount(id) {
+    setSelectedAccountIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      return [...prev, id];
+    });
+  }
 
-      setEmailStatus({ state: "ok", details: results });
-    } catch (err) {
-      setEmailStatus({ state: "error", details: [] });
-      setSendError(
-        err?.response?.data?.message ||
-          err?.response?.data?.error ||
-          err.message ||
-          "Email check failed"
-      );
-    }
+  function toggleRegion(region) {
+    setSelectedRegions((prev) => {
+      if (prev.includes(region)) return prev.filter((x) => x !== region);
+      return [...prev, region];
+    });
   }
 
   function handleSendClick() {
@@ -174,7 +241,7 @@ export default function App() {
     setSendError("");
 
     if (!canEnableSend) {
-      setSendError("Complete SES check + valid days + valid regions first.");
+      setSendError("Complete SES check + valid days + choose accounts/regions first.");
       return;
     }
 
@@ -198,29 +265,22 @@ export default function App() {
       // 2) Send report
       await reportSend({
         days: daysNum,
-        emailsCsv,
-        regions,
+        emails: emailsCsv,
+        toEmails: emailsCsv,
+
+        all_accounts: allAccounts,
+        accountIds: selectedAccountIds,
+
+        all_regions: allRegions,
+        regions: selectedRegions,
       });
 
       setSendState("success");
 
-      // Clear values after success
-      setEmailsRaw("");
-      setDays("");
-      setRegionsRaw("");
-      setEmailStatus({ state: "idle", details: [] });
-      setSendError("");
-      setOtp("");
-      setOtpAttempts(0);
-      setLocked(false);
-
       setTimeout(() => setSendState("idle"), 2000);
     } catch (err) {
       const msg =
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        err.message ||
-        "Failed";
+        err?.response?.data?.message || err?.response?.data?.error || err?.message || "Failed";
 
       const nextAttempts = otpAttempts + 1;
       setOtpAttempts(nextAttempts);
@@ -239,13 +299,18 @@ export default function App() {
   function resetAll() {
     setEmailsRaw("");
     setDays("7");
-    setRegionsRaw("ap-south-1");
     setEmailStatus({ state: "idle", details: [] });
     setSendState("idle");
     setSendError("");
     setOtp("");
     setOtpAttempts(0);
     setLocked(false);
+
+    setAllAccounts(false);
+    if (accounts.length) setSelectedAccountIds([accounts[0].id]);
+
+    setAllRegions(true);
+    setSelectedRegions([]);
   }
 
   return (
@@ -259,11 +324,7 @@ export default function App() {
         transition={{ duration: 0.6 }}
       >
         <div className="logo-container">
-          <img
-            className="logo"
-            src="/AutomateX_logo.png"
-            alt="AutomateX Logo"
-          />
+          <img className="logo" src="/AutomateX_logo.png" alt="AutomateX Logo" />
         </div>
 
         <h2 className="headerText">HDFC - Security Report Dashboard</h2>
@@ -277,23 +338,47 @@ export default function App() {
             placeholder="Enter emails"
             disabled={locked}
           />
-          <motion.button
-            className="button"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleValidateEmails}
-            disabled={!canValidateEmails}
-          >
-            {emailStatus.state === "loading" ? "Checking..." : "Check in SES"}
-          </motion.button>
 
+          {emailStatus.state === "loading" && <div>Checking SES…</div>}
           {emailStatus.state === "ok" && <div className="ok">All emails verified in SES.</div>}
-          {emailStatus.state === "bad" && <div className="err">Not verified in SES: {notVerifiedEmails.join(", ")}</div>}
-          {emailStatus.state === "error" && <div className="err">SES check failed. {sendError}</div>}
+          {emailStatus.state === "bad" && (
+            <div className="err">Not verified in SES: {notVerifiedEmails.join(", ")}</div>
+          )}
+          {emailStatus.state === "error" && (
+            <div className="err">SES check failed. Fix emails or try again.</div>
+          )}
         </div>
 
         <div className="section">
-          <label className="label">2) Days (1 - 90)</label>
+          <label className="label">2) Accounts</label>
+
+          <label style={{ display: "block", marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              checked={allAccounts}
+              onChange={(e) => setAllAccounts(e.target.checked)}
+              disabled={!emailsValidated || locked}
+            />{" "}
+            All accounts
+          </label>
+
+          <div style={{ maxHeight: 120, overflow: "auto", opacity: allAccounts ? 0.5 : 1 }}>
+            {accounts.map((a) => (
+              <label key={a.id} style={{ display: "block" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedAccountIds.includes(a.id)}
+                  onChange={() => toggleAccount(a.id)}
+                  disabled={allAccounts || !emailsValidated || locked}
+                />{" "}
+                {a.name} ({a.id})
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="section">
+          <label className="label">3) Days (1 - 90)</label>
           <input
             className="input"
             value={days}
@@ -305,15 +390,35 @@ export default function App() {
         </div>
 
         <div className="section">
-          <label className="label">3) Regions (comma separated)</label>
-          <input
-            className="input"
-            value={regionsRaw}
-            onChange={(e) => setRegionsRaw(e.target.value)}
-            placeholder="ap-south-1"
-            disabled={!emailsValidated || !daysValid || locked}
-          />
-          {regionsRaw && !regionsValid && <div className="err">Enter valid AWS regions (ex: ap-south-1).</div>}
+          <label className="label">4) Regions</label>
+
+          <label style={{ display: "block", marginBottom: 8 }}>
+            <input
+              type="checkbox"
+              checked={allRegions}
+              onChange={(e) => setAllRegions(e.target.checked)}
+              disabled={!emailsValidated || !daysValid || locked}
+            />{" "}
+            All regions
+          </label>
+
+          <div style={{ maxHeight: 140, overflow: "auto", opacity: allRegions ? 0.5 : 1 }}>
+            {availableRegions.map((r) => (
+              <label key={r} style={{ display: "block" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedRegions.includes(r)}
+                  onChange={() => toggleRegion(r)}
+                  disabled={allRegions || !emailsValidated || !daysValid || locked}
+                />{" "}
+                {r}
+              </label>
+            ))}
+          </div>
+
+          {!allRegions && selectedRegions.length === 0 && (
+            <div className="err">Select at least 1 region or choose All regions.</div>
+          )}
         </div>
 
         <motion.button
@@ -365,9 +470,7 @@ export default function App() {
           />
         )}
 
-        {sendState === "success" && (
-          <div className="successCircle">Sent</div>
-        )}
+        {sendState === "success" && <div className="successCircle">Sent</div>}
 
         {sendError && <div className="err">{sendError}</div>}
       </motion.div>
