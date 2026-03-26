@@ -70,9 +70,8 @@ export default function App() {
   const [accounts, setAccounts] = useState([]); // [{id,name}]
   const [selectedAccountIds, setSelectedAccountIds] = useState([]);
   const [allAccounts, setAllAccounts] = useState(false);
-
-
   const [primaryAccountId, setPrimaryAccountId] = useState("");
+
   // regions
   const [availableRegions, setAvailableRegions] = useState([]);
   const [selectedRegions, setSelectedRegions] = useState([]);
@@ -103,9 +102,12 @@ export default function App() {
   const daysNum = Number(days);
   const daysValid = Number.isFinite(daysNum) && daysNum > 0 && daysNum <= 90;
 
-  const selectedAccountsEffective = allAccounts
-    ? accounts.map((a) => a.id)
-    : Array.from(new Set([primaryAccountId, ...selectedAccountIds].filter(Boolean)));
+  // If allAccounts => include all account ids
+  // Else => always include primary + any checked accounts
+  const selectedAccountsEffective = useMemo(() => {
+    if (allAccounts) return accounts.map((a) => a.id);
+    return Array.from(new Set([primaryAccountId, ...selectedAccountIds].filter(Boolean)));
+  }, [allAccounts, accounts, primaryAccountId, selectedAccountIds]);
 
   const canEnableSend =
     !locked &&
@@ -129,10 +131,12 @@ export default function App() {
         const list = out?.accounts || [];
         setAccounts(list);
 
-        // default select first account (if exists)
         if (list.length) {
-          setSelectedAccountIds([list[0].id]);
-          setPrimaryAccountId(list[0].id);
+          // Default: primary is first
+          setPrimaryAccountId((prev) => prev || list[0].id);
+
+          // If nothing selected yet, select first as well
+          setSelectedAccountIds((prev) => (prev?.length ? prev : [list[0].id]));
         }
       } catch (e) {
         setSendError(
@@ -143,20 +147,33 @@ export default function App() {
     init();
   }, []);
 
-  // Load regions when selected account changes (use first selected account)
+  // Keep primary account valid when accounts list changes
+  useEffect(() => {
+    if (!accounts.length) return;
+    if (!primaryAccountId) {
+      setPrimaryAccountId(accounts[0].id);
+      return;
+    }
+    const exists = accounts.some((a) => a.id === primaryAccountId);
+    if (!exists) setPrimaryAccountId(accounts[0].id);
+  }, [accounts, primaryAccountId]);
+
+  // Load regions when primary account changes
   useEffect(() => {
     async function loadRegions() {
       try {
         const accountId = primaryAccountId || "";
         if (!accountId) return;
+
         const out = await regionsList(accountId);
         const regions = out?.regions || [];
         setAvailableRegions(regions);
 
-        // If allRegions = true, we don't need selections. If false, default select first 1
         if (!allRegions) {
+          // Ensure selectedRegions are subset of available regions
           setSelectedRegions((prev) => {
-            if (prev && prev.length) return prev.filter((r) => regions.includes(r));
+            const next = (prev || []).filter((r) => regions.includes(r));
+            if (next.length) return next;
             return regions.length ? [regions[0]] : [];
           });
         }
@@ -166,6 +183,7 @@ export default function App() {
         );
       }
     }
+
     loadRegions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryAccountId, allRegions]);
@@ -204,9 +222,9 @@ export default function App() {
         setEmailStatus({ state: "error", details: [] });
         setSendError(
           err?.response?.data?.message ||
-          err?.response?.data?.error ||
-          err?.message ||
-          "Email check failed"
+            err?.response?.data?.error ||
+            err?.message ||
+            "Email check failed"
         );
       }
     }, 900);
@@ -221,6 +239,19 @@ export default function App() {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       return [...prev, id];
     });
+  }
+
+  function handleAllAccountsToggle(next) {
+    setAllAccounts(next);
+
+    // When switching off "All accounts", ensure at least primary is present
+    if (!next) {
+      setSelectedAccountIds((prev) => {
+        const base = prev?.length ? prev : [];
+        const nextIds = Array.from(new Set([primaryAccountId, ...base].filter(Boolean)));
+        return nextIds.length ? nextIds : base;
+      });
+    }
   }
 
   function toggleRegion(region) {
@@ -271,7 +302,7 @@ export default function App() {
 
         // emails
         toEmails: emailsCsv,
-        emails: emails,
+        emails: emails, // array
 
         // accounts
         all_accounts: allAccounts,
@@ -282,12 +313,15 @@ export default function App() {
         all_regions: allRegions,
         regions: allRegions ? [] : selectedRegions,
       });
-      setSendState("success");
 
+      setSendState("success");
       setTimeout(() => setSendState("idle"), 2000);
     } catch (err) {
       const msg =
-        err?.response?.data?.message || err?.response?.data?.error || err?.message || "Failed";
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed";
 
       const nextAttempts = otpAttempts + 1;
       setOtpAttempts(nextAttempts);
@@ -314,7 +348,15 @@ export default function App() {
     setLocked(false);
 
     setAllAccounts(false);
-    if (accounts.length) setSelectedAccountIds([accounts[0].id]);
+
+    // restore defaults
+    if (accounts.length) {
+      setPrimaryAccountId(accounts[0].id);
+      setSelectedAccountIds([accounts[0].id]);
+    } else {
+      setPrimaryAccountId("");
+      setSelectedAccountIds([]);
+    }
 
     setAllRegions(true);
     setSelectedRegions([]);
@@ -347,9 +389,13 @@ export default function App() {
           />
 
           {emailStatus.state === "loading" && <div>Checking SES…</div>}
-          {emailStatus.state === "ok" && <div className="ok">All emails verified in SES.</div>}
+          {emailStatus.state === "ok" && (
+            <div className="ok">All emails verified in SES.</div>
+          )}
           {emailStatus.state === "bad" && (
-            <div className="err">Not verified in SES: {notVerifiedEmails.join(", ")}</div>
+            <div className="err">
+              Not verified in SES: {notVerifiedEmails.join(", ")}
+            </div>
           )}
           {emailStatus.state === "error" && (
             <div className="err">SES check failed. Fix emails or try again.</div>
@@ -360,16 +406,38 @@ export default function App() {
           <label className="label">2) Accounts</label>
 
           <label style={{ display: "block", marginBottom: 8 }}>
+            Primary account{" "}
+            <select
+              className="input"
+              value={primaryAccountId}
+              onChange={(e) => setPrimaryAccountId(e.target.value)}
+              disabled={!emailsValidated || locked || accounts.length === 0}
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.id})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={{ display: "block", marginBottom: 8 }}>
             <input
               type="checkbox"
               checked={allAccounts}
-              onChange={(e) => setAllAccounts(e.target.checked)}
+              onChange={(e) => handleAllAccountsToggle(e.target.checked)}
               disabled={!emailsValidated || locked}
             />{" "}
             All accounts
           </label>
 
-          <div style={{ maxHeight: 120, overflow: "auto", opacity: allAccounts ? 0.5 : 1 }}>
+          <div
+            style={{
+              maxHeight: 120,
+              overflow: "auto",
+              opacity: allAccounts ? 0.5 : 1,
+            }}
+          >
             {accounts.map((a) => (
               <label key={a.id} style={{ display: "block" }}>
                 <input
@@ -393,7 +461,9 @@ export default function App() {
             placeholder="7"
             disabled={!emailsValidated || locked}
           />
-          {!daysValid && days !== "" && <div className="err">Days must be between 1 and 90.</div>}
+          {!daysValid && days !== "" && (
+            <div className="err">Days must be between 1 and 90.</div>
+          )}
         </div>
 
         <div className="section">
@@ -409,7 +479,13 @@ export default function App() {
             All regions
           </label>
 
-          <div style={{ maxHeight: 140, overflow: "auto", opacity: allRegions ? 0.5 : 1 }}>
+          <div
+            style={{
+              maxHeight: 140,
+              overflow: "auto",
+              opacity: allRegions ? 0.5 : 1,
+            }}
+          >
             {availableRegions.map((r) => (
               <label key={r} style={{ display: "block" }}>
                 <input
@@ -424,7 +500,9 @@ export default function App() {
           </div>
 
           {!allRegions && selectedRegions.length === 0 && (
-            <div className="err">Select at least 1 region or choose All regions.</div>
+            <div className="err">
+              Select at least 1 region or choose All regions.
+            </div>
           )}
         </div>
 
@@ -484,4 +562,3 @@ export default function App() {
     </div>
   );
 }
-
